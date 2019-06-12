@@ -1,12 +1,23 @@
 #!/bin/bash 
-set -eux
+##
+## Script to back up to a mount point destination
+## It will take a snapshot of a PVC, map it to a rbd device and mount it
 
-# global variables
-pod=$1
+#set -eux
+
+# define global variables
+pod=""
 claimName=""	
 pvc=""
 snap=""
 target=""
+
+# Set defaults for command options
+delete=False
+k8s_cmd='kubectl'
+
+
+###################### FUNCTIONS ####################
 
 # function to get PVCs for a given pod
 function get_pvc {
@@ -51,10 +62,62 @@ function unmap_rbd {
 }
 
 function delete_snap {
-kubectl delete volumesnapshot $1
+$k8s_cmd delete volumesnapshot $1
 }
 
-############### MAIN #######################
+function _usage {
+  cat << END
+
+Backs up a snapshot of a PV to a directory
+
+Usage: $(basename "${0}") [-c <kubectl_cmd>] <pod_name>
+
+  -p <pod_name>     : The name of the (p)od for which the PV should be backed up
+
+  -c <kubectl_cmd>  : The (c)ommand to use for k8s admin (defaults to 'kubectl' for now)
+
+  -d                : (D)elete the snapshot once done with the backup
+
+  -h                : Help
+
+
+END
+}
+
+# Capture and act on command options
+while getopts ":p:c:dh" opt; do
+  case $opt in 
+    p)
+      pod=${OPTARG}
+      ;;
+    c)
+      k8s_cmd=${OPTARG}
+      ;;
+    d)
+      delete=True
+      ;;
+    h)
+      _usage
+      exit 1
+      ;;
+    \?)
+      echo "ERROR: Invalid option -${OPTARG}" >&2
+      _usage
+      exit 1
+      ;;
+    :)
+      echo "Error: Option -${OPTARG} requires an argument." >&2
+      _usage
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z $pod ]
+then
+  echo "No pod to backup given, exitting"
+  exit 1 
+fi
 
 echo "Getting pvc data for pod $pod"
 echo
@@ -76,7 +139,16 @@ map_rbd
 echo "Unmounting and unmapping the rbd"
 unmap_rbd
 
-echo "Deleting the snapshot"
-echo 
-delete_snap $target
-kubectl get volumesnapshot
+echo $delete
+
+if [ $delete = "True" ]
+then 
+  echo "Deleting the snapshot"
+  echo 
+  delete_snap $target
+  kubectl get volumesnapshot
+else
+  echo "Not deleting the snapshot, make sure to take manual care of it!"
+  echo
+fi 
+
